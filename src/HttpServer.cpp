@@ -6,20 +6,20 @@
 namespace pmc {
 namespace net {
 
-/* 所有HttpServer的异常基类 */
+/* Base exception class for all HttpServer exceptions */
 class HttpServerException: public std::runtime_error {
     public:
         HttpServerException(const std::string& msg): runtime_error(msg) {}
 };
 
-/* 所有HttpListener发生异常的基类 */
+/* Base exception class for all HttpListener exceptions */
 class HttpListenerException: public HttpServerException {
     public:
         explicit HttpListenerException(const std::string& msg)
         : HttpServerException(msg) {}
 };
 
-/* 创建IO_CONTEXT失败 */
+/* Failed to create IO_CONTEXT */
 class CreateObjectFailed: public HttpServerException {
     public:
         explicit CreateObjectFailed(const std::string& msg)
@@ -27,7 +27,7 @@ class CreateObjectFailed: public HttpServerException {
 };
 
 
-// Session类 - 处理单个HTTP连接
+// Session class - handles individual HTTP connections
 class HttpServer::Session : public std::enable_shared_from_this<Session> {
 public:
     Session(tcp::socket&& socket, HttpServer* server)
@@ -46,21 +46,21 @@ private:
                 if (!ec) {
                     processRequest();
                 } else if (ec != http::error::end_of_stream) {
-                    // 错误处理
+                    // Error handling
                 }
             });
     }
     
     void processRequest() {
         try {
-            // 创建响应对象
+            // Create response object
             auto response = std::make_shared<http::response<http::string_body>>(
                 server_->handleRequest(request_)
             );
             doWrite(response);
         } catch (const std::exception& e) {
             std::cerr << "Error processing request: " << e.what() << std::endl;
-            // 发送错误响应
+            // Send error response
             auto error_response = std::make_shared<http::response<http::string_body>>();
             error_response->version(request_.version());
             error_response->result(http::status::internal_server_error);
@@ -76,12 +76,12 @@ private:
         http::async_write(socket_, *response,
             [this, self, response](beast::error_code ec, std::size_t) {
                 if (!ec) {
-                    // 检查是否需要保持连接
+                    // Check if connection should be kept alive
                     if (!response->keep_alive()) {
                         socket_.shutdown(tcp::socket::shutdown_send, ec);
                     }
                 }
-                // 继续读取下一个请求
+                // Continue reading next request
                 doRead();
             });
     }
@@ -92,7 +92,7 @@ private:
     HttpServer* server_;
 };
 
-// Listener类 - 接受新连接
+// Listener class - accepts new connections
 class HttpServer::Listener : public std::enable_shared_from_this<Listener> {
 public:
     Listener(asio::io_context& ioc, tcp::endpoint endpoint, HttpServer* server)
@@ -138,7 +138,7 @@ private:
     HttpServer* server_;
 };
 
-// HttpServer实现 - 构造函数（指定监听地址和线程数量）
+// HttpServer implementation - constructor (specifies listening address and thread count)
 HttpServer::HttpServer(const std::string& address, unsigned short port, unsigned int threads)
     : address_(address), port_(port), threads_(threads), 
       ioc_(std::make_unique<asio::io_context>(threads)) {
@@ -157,11 +157,11 @@ void HttpServer::start() {
     }
     
     try {
-        // 创建端点（使用指定的地址和端口）
+        // Create endpoint (using specified address and port)
         asio::ip::address ip_address = asio::ip::make_address(address_);
         tcp::endpoint endpoint(ip_address, port_);
         
-        // 创建监听器
+        // Create listener
         listener_ = std::make_shared<Listener>(*ioc_, endpoint, this);
 
         if (!listener_) {
@@ -171,7 +171,7 @@ void HttpServer::start() {
         
         running_ = true;
         
-        // 启动工作线程
+        // Start worker threads
         for (unsigned int i = 0; i < threads_; ++i) {
             worker_threads_.emplace_back([this]() {
                 try {
@@ -307,28 +307,28 @@ std::unordered_map<std::string, std::string> HttpServer::parseQueryParams(const 
 }
 
 http::response<http::string_body> HttpServer::handleRequest(const http::request<http::string_body>& req) {
-    // 将 target() 转换为字符串
+    // Convert target() to string
     std::string target_path = std::string(req.target().data(), req.target().size());
     std::string query_string;
     
-    // 分离路径和查询参数
+    // Split path and query parameters
     auto query_pos = target_path.find('?');
     if (query_pos != std::string::npos) {
         query_string = target_path.substr(query_pos + 1);
         target_path = target_path.substr(0, query_pos);
     }
     
-    // 解析查询参数
+    // Parse query parameters
     auto query_params = parseQueryParams(query_string);
     
-    // 准备响应对象
+    // Prepare response object
     http::response<http::string_body> response;
     response.version(req.version());
     response.set(http::field::server, "Boost.Beast HttpServer");
     response.set(http::field::content_type, "text/plain");
     response.keep_alive(req.keep_alive());
     
-    // 执行中间件链
+    // Execute middleware chain
     bool middleware_handled = false;
     for (const auto& middleware : middlewares_) {
         if (!middleware(req, response, query_params)) {
@@ -337,13 +337,13 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
         }
     }
     
-    // 如果中间件处理了请求，直接返回
+    // If middleware handled the request, return directly
     if (middleware_handled) {
         response.prepare_payload();
         return response;
     }
     
-    // 查找路由处理器
+    // Find route handler
     HttpRequestHandler handler = nullptr;
     
     switch (req.method()) {
@@ -379,7 +379,7 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
             break;
     }
     
-    // 处理静态文件
+    // Handle static files
     if (!handler && !static_directory_.empty()) {
         std::string file_path = static_directory_ + target_path;
         std::ifstream file(file_path, std::ios::binary);
@@ -390,7 +390,7 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
             response.result(http::status::ok);
             response.body() = buffer.str();
             
-            // 根据文件扩展名设置Content-Type
+            // Set Content-Type based on file extension
             if (boost::algorithm::ends_with(file_path, ".html")) {
                 response.set(http::field::content_type, "text/html");
             } else if (boost::algorithm::ends_with(file_path, ".css")) {
@@ -411,7 +411,7 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
         }
     }
     
-    // 如果找到处理器，调用它
+    // If handler found, call it
     if (handler) {
         try {
             return handler(req, query_params);

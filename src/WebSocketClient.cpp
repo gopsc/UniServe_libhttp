@@ -21,45 +21,45 @@ namespace beast = boost::beast;
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 
-// 内部实现结构体
+// Internal implementation structure
 struct WebSocketClient::Impl {
-    // 配置参数
+    // Configuration parameters
     std::string host;
     std::string port;
     std::string path;
     
-    // Boost 对象
+    // Boost objects
     asio::io_context ioc;
     tcp::resolver resolver;
     beast::websocket::stream<beast::tcp_stream> ws;
     
-    // 线程管理
+    // Thread management
     std::thread io_thread;
     std::atomic<bool> running{false};
     
-    // 回调函数
+    // Callback functions
     WebSocketClientBase::MessageCallback message_callback;
     WebSocketClientBase::ErrorCallback error_callback;
     WebSocketClientBase::ConnectCallback connect_callback;
     WebSocketClientBase::CloseCallback close_callback;
     
-    // 消息队列
+    // Message queue
     std::queue<std::string> send_queue;
     std::mutex queue_mutex;
     std::condition_variable queue_cv;
     std::atomic<bool> sending{false};
     
-    // 状态标志
+    // Status flags
     std::atomic<bool> connected{false};
     std::atomic<bool> connecting{false};
     std::atomic<bool> stopping{false};
     
-    // 配置选项
+    // Configuration options
     bool auto_reconnect{false};
     int reconnect_interval_ms{3000};
     int heartbeat_interval_ms{30000};
     
-    // 构造函数
+    // Constructor
     Impl(const std::string& host, const std::string& port, const std::string& path)
         : host(host)
         , port(port)
@@ -69,12 +69,12 @@ struct WebSocketClient::Impl {
     {
     }
     
-    // 析构函数
+    // Destructor
     ~Impl() {
         stop();
     }
     
-    // 启动IO线程
+    // Start IO thread
     void start() {
         if (!running) {
             running = true;
@@ -84,14 +84,14 @@ struct WebSocketClient::Impl {
                         ioc.run();
                         break;
                     } catch (const std::exception& e) {
-                        std::cerr << "IO上下文异常: " << e.what() << std::endl;
+                        std::cerr << "IO context exception: " << e.what() << std::endl;
                     }
                 }
             });
         }
     }
     
-    // 停止IO线程
+    // Stop IO thread
     void stop() {
         running = false;
         stopping = true;
@@ -102,7 +102,7 @@ struct WebSocketClient::Impl {
         }
     }
     
-    // 执行连接
+    // Perform connection
     void doConnect() {
         if (connecting || connected) {
             return;
@@ -111,69 +111,69 @@ struct WebSocketClient::Impl {
         connecting = true;
         connected = false;
         
-        // 解析主机名
+        // Resolve hostname
         resolver.async_resolve(host, port,
             [this](beast::error_code ec, tcp::resolver::results_type results) {
                 onResolve(ec, results);
             });
     }
     
-    // 解析完成回调
+    // Resolve completion callback
     void onResolve(beast::error_code ec, tcp::resolver::results_type results) {
         if (ec) {
-            onError("解析失败: " + ec.message());
+            onError("Resolve failed: " + ec.message());
             return;
         }
         
-        // 连接到解析出的端点
+        // Connect to resolved endpoints
         beast::get_lowest_layer(ws).async_connect(results,
             [this](beast::error_code ec, tcp::resolver::results_type::endpoint_type) {
                 onConnect(ec);
             });
     }
     
-    // 连接完成回调
+    // Connection completion callback
     void onConnect(beast::error_code ec) {
         if (ec) {
-            onError("连接失败: " + ec.message());
+            onError("Connection failed: " + ec.message());
             return;
         }
         
-        // 设置WebSocket选项
+        // Set WebSocket options
         ws.set_option(beast::websocket::stream_base::timeout::suggested(
             beast::role_type::client));
         
-        // 执行WebSocket握手
+        // Perform WebSocket handshake
         ws.async_handshake(host, path,
             [this](beast::error_code ec) {
                 onHandshake(ec);
             });
     }
     
-    // 握手完成回调
+    // Handshake completion callback
     void onHandshake(beast::error_code ec) {
         connecting = false;
         
         if (ec) {
-            onError("握手失败: " + ec.message());
+            onError("Handshake failed: " + ec.message());
             return;
         }
         
         connected = true;
         
-        // 调用连接成功回调
+        // Call connection success callback
         if (connect_callback) {
             connect_callback(true);
         }
         
-        // 开始读取消息
+        // Start reading messages
         doRead();
         
-        // 开始发送队列中的消息
+        // Start sending queued messages
         doSend();
     }
     
-    // 读取消息
+    // Read messages
     void doRead() {
         if (!connected) {
             return;
@@ -185,19 +185,19 @@ struct WebSocketClient::Impl {
             });
     }
     
-    // 读取完成回调
+    // Read completion callback
     void onRead(beast::error_code ec, std::size_t bytes_transferred) {
         if (ec) {
             if (ec == beast::websocket::error::closed) {
-                // 正常关闭
+                // Normal close
                 onClose();
             } else {
-                onError("读取失败: " + ec.message());
+                onError("Read failed: " + ec.message());
             }
             return;
         }
         
-        // 处理接收到的消息
+        // Process received message
         std::string message = beast::buffers_to_string(buffer.data());
         buffer.consume(bytes_transferred);
         
@@ -205,11 +205,11 @@ struct WebSocketClient::Impl {
             message_callback(message);
         }
         
-        // 继续读取
+        // Continue reading
         doRead();
     }
     
-    // 发送消息
+    // Send messages
     void doSend() {
         if (!connected || sending) {
             return;
@@ -231,38 +231,38 @@ struct WebSocketClient::Impl {
             });
     }
     
-    // 写入完成回调
+    // Write completion callback
     void onWrite(beast::error_code ec, std::size_t bytes_transferred) {
         sending = false;
         
         if (ec) {
-            onError("写入失败: " + ec.message());
+            onError("Write failed: " + ec.message());
             return;
         }
         
-        // 继续发送队列中的消息
+        // Continue sending queued messages
         doSend();
     }
     
-    // 错误处理
+    // Error handling
     void onError(const std::string& error) {
         connecting = false;
         connected = false;
         
-        std::cerr << "WebSocket错误: " << error << std::endl;
+        std::cerr << "WebSocket error: " << error << std::endl;
         
         if (error_callback) {
             error_callback(error);
         }
         
-        // 自动重连
+        // Auto reconnect
         if (auto_reconnect && !stopping) {
             std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_interval_ms));
             asio::post(ioc, [this]() { doConnect(); });
         }
     }
     
-    // 连接关闭
+    // Connection close
     void onClose() {
         connected = false;
         
@@ -270,7 +270,7 @@ struct WebSocketClient::Impl {
             close_callback();
         }
         
-        // 自动重连
+        // Auto reconnect
         if (auto_reconnect && !stopping) {
             std::this_thread::sleep_for(std::chrono::milliseconds(reconnect_interval_ms));
             asio::post(ioc, [this]() { doConnect(); });
@@ -281,7 +281,7 @@ private:
     beast::flat_buffer buffer;
 };
 
-// WebSocketClient 实现
+// WebSocketClient implementation
 WebSocketClient::WebSocketClient(const std::string& host, const std::string& port, const std::string& path)
     : impl_(std::make_unique<Impl>(host, port, path))
 {

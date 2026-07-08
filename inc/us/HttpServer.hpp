@@ -28,18 +28,18 @@ namespace pmc {
 namespace net {
 
 /**
- * @brief HTTP请求处理器类型定义
+ * @brief HTTP request handler type definition
  * 
- * 处理HTTP请求并返回响应
+ * Handles HTTP requests and returns responses
  */
 using HttpRequestHandler = std::function<http::response<http::string_body>(
     const http::request<http::string_body>&,
     const std::unordered_map<std::string, std::string>&)>;
 
 /**
- * @brief 中间件处理器类型定义
+ * @brief Middleware handler type definition
  * 
- * 用于处理请求链的中间件
+ * Used for request chain processing
  */
 using MiddlewareHandler = std::function<bool(
     const http::request<http::string_body>&,
@@ -47,152 +47,153 @@ using MiddlewareHandler = std::function<bool(
     const std::unordered_map<std::string, std::string>&)>;
 
 /**
- * @brief HTTP服务器类（合并增强版）
+ * @brief HTTP Server class (enhanced merged version)
  * 
- * 基于boost::asio和boost::beast的异步HTTP服务器
- * 结合了原始版本的易用性和修复版本的功能完整性
+ * Asynchronous HTTP server based on boost::asio and boost::beast
+ * Combines ease of use from original version with functional completeness
+ * of the fixed version
  */
 class HttpServer {
 public:
     /**
-     * @brief 构造函数（监听所有接口）
-     * @param port 监听端口
-     * @param threads 工作线程数
+     * @brief Constructor (listens on all interfaces)
+     * @param port Listening port
+     * @param threads Number of worker threads
      */
     explicit HttpServer(unsigned short port, unsigned int threads = 1);
     
     /**
-     * @brief 构造函数（指定监听地址）
-     * @param address 监听IP地址（如 "0.0.0.0" 或 "127.0.0.1"）
-     * @param port 监听端口
-     * @param threads 工作线程数
+     * @brief Constructor (specifies listening address)
+     * @param address Listening IP address (e.g., "0.0.0.0" or "127.0.0.1")
+     * @param port Listening port
+     * @param threads Number of worker threads
      */
     explicit HttpServer(const std::string& address, unsigned short port, unsigned int threads = 1);
     
     /**
-     * @brief 析构函数
+     * @brief Destructor
      */
     ~HttpServer();
     
     /**
-     * @brief 启动服务器
+     * @brief Start the server
      */
     void start();
     
     /**
-     * @brief 停止服务器 不要在工作线程调用
+     * @brief Stop the server (do not call from worker threads)
      */
     void stop();
     
     /**
-     * @brief 注册GET请求处理器
-     * @param path 请求路径
-     * @param handler 请求处理器
+     * @brief Register GET request handler
+     * @param path Request path
+     * @param handler Request handler
      */
     void get(const std::string& path, HttpRequestHandler handler);
     
     /**
-     * @brief 注册POST请求处理器
-     * @param path 请求路径
-     * @param handler 请求处理器
+     * @brief Register POST request handler
+     * @param path Request path
+     * @param handler Request handler
      */
     void post(const std::string& path, HttpRequestHandler handler);
     
     /**
-     * @brief 注册PUT请求处理器
-     * @param path 请求路径
-     * @param handler 请求处理器
+     * @brief Register PUT request handler
+     * @param path Request path
+     * @param handler Request handler
      */
     void put(const std::string& path, HttpRequestHandler handler);
     
     /**
-     * @brief 注册DELETE请求处理器
-     * @param path 请求路径
-     * @param handler 请求处理器
+     * @brief Register DELETE request handler
+     * @param path Request path
+     * @param handler Request handler
      */
     void del(const std::string& path, HttpRequestHandler handler);
     
     /**
-     * @brief 注册中间件
-     * @param middleware 中间件处理器
+     * @brief Register middleware
+     * @param middleware Middleware handler
      */
     void use(MiddlewareHandler middleware);
     
     /**
-     * @brief 设置静态文件目录
-     * @param path 静态文件目录路径
+     * @brief Set static file directory
+     * @param path Static file directory path
      */
     void setStaticDirectory(const std::string& path);
     
     /**
-     * @brief 获取服务器状态
-     * @return 服务器是否正在运行
+     * @brief Get server status
+     * @return Whether the server is running
      */
     bool isRunning() const;
     
     /**
-     * @brief 获取服务器端口
-     * @return 服务器监听端口
+     * @brief Get server port
+     * @return Server listening port
      */
     unsigned short getPort() const;
     
     /**
-     * @brief 获取服务器监听地址
-     * @return 服务器监听地址
+     * @brief Get server listening address
+     * @return Server listening address
      */
     std::string getAddress() const;
     
     /**
-     * @brief 运行服务器（阻塞调用）- 从原始版本继承
+     * @brief Run the server (blocking call) - inherited from original version
      */
     void run();
     
     /**
-     * @brief 显示服务器状态信息 - 从原始版本继承
+     * @brief Display server status information - inherited from original version
      */
     void showStatus() const;
 
 private:
-    // 内部类声明
+    // Internal class declarations
     class Session;
     class Listener;
     
-    // 服务器配置
+    // Server configuration
     std::string address_;
     unsigned short port_;
     unsigned int threads_;
     std::atomic<bool> running_{false};
     
-    // Boost.Asio上下文
+    // Boost.Asio context
     std::unique_ptr<asio::io_context> ioc_;
     
-    // 网络组件
+    // Network components
     std::shared_ptr<Listener> listener_;
     std::vector<std::thread> worker_threads_;
     
-    // 路由表
+    // Route tables
     std::unordered_map<std::string, HttpRequestHandler> get_handlers_;
     std::unordered_map<std::string, HttpRequestHandler> post_handlers_;
     std::unordered_map<std::string, HttpRequestHandler> put_handlers_;
     std::unordered_map<std::string, HttpRequestHandler> delete_handlers_;
     
-    // 中间件链
+    // Middleware chain
     std::vector<MiddlewareHandler> middlewares_;
     
-    // 静态文件目录
+    // Static file directory
     std::string static_directory_;
     
-    // 会话管理
+    // Session management
     std::vector<std::weak_ptr<Session>> sessions_;
     std::mutex sessions_mutex_;
     
-    // 内部方法
+    // Internal methods
     std::unordered_map<std::string, std::string> parseQueryParams(const std::string& query);
     
-    // 请求处理
+    // Request handling
     http::response<http::string_body> handleRequest(const http::request<http::string_body>& req);
     
-    // 会话管理
+    // Session management
     void addSession(const std::shared_ptr<Session>& session);
     void removeSession(const Session* session);
     void closeAllSessions();

@@ -1,5 +1,5 @@
-// WebSocketServer.cpp - WebSocket服务器实现
-// 基于Boost.Beast和Boost.Asio
+// WebSocketServer.cpp - WebSocket server implementation
+// Based on Boost.Beast and Boost.Asio
 
 #include "us/WebSocketServer.hpp"
 #include <iostream>
@@ -20,29 +20,29 @@ using tcp = asio::ip::tcp;
 
 namespace pmc::net {
 
-// 内部Session类实现
+// Internal Session class implementation
 class WebSocketServer::Session : public std::enable_shared_from_this<Session> {
 public:
     Session(tcp::socket socket, WebSocketServer* server)
         : ws_(std::move(socket))
         , server_(server) {
         
-        // 获取远程地址
+        // Get remote address
         auto endpoint = ws_.next_layer().socket().remote_endpoint();
         remoteAddress_ = endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
     }
 
     void start() {
-        // 生成客户端ID
+        // Generate client ID
         if (server_) {
             clientId_ = server_->generateClientId();
         } else {
-            // 如果server为空，使用默认ID
+            // If server is null, use default ID
             static std::atomic<uint64_t> counter{0};
             clientId_ = "client_" + std::to_string(++counter);
         }
         
-        // 异步接受WebSocket握手
+        // Asynchronously accept WebSocket handshake
         ws_.async_accept(
             beast::bind_front_handler(
                 &Session::onAccept,
@@ -50,12 +50,12 @@ public:
     }
 
     void send(const std::string& message) {
-        // 将消息添加到发送队列
+        // Add message to send queue
         bool write_in_progress = !sendQueue_.empty();
         sendQueue_.push_back(message);
         
         if (!write_in_progress) {
-            // 开始异步写入
+            // Start asynchronous write
             doWrite();
         }
     }
@@ -77,22 +77,22 @@ private:
             return;
         }
         
-        // 添加到服务器客户端列表
+        // Add to server client list
         if (server_) {
             server_->addClient(clientId_, shared_from_this());
             
-            // 调用连接处理器
+            // Call connection handler
             if (server_->connectHandler_) {
                 server_->connectHandler_(clientId_, remoteAddress_);
             }
         }
         
-        // 开始读取消息
+        // Start reading messages
         doRead();
     }
 
     void doRead() {
-        // 异步读取消息
+        // Asynchronously read message
         ws_.async_read(
             buffer_,
             beast::bind_front_handler(
@@ -102,7 +102,7 @@ private:
 
     void onRead(beast::error_code ec, std::size_t bytes_transferred) {
         if (ec == websocket::error::closed) {
-            // 正常关闭
+            // Normal close
             if (server_) {
                 server_->removeClient(clientId_);
                 if (server_->disconnectHandler_) {
@@ -123,21 +123,21 @@ private:
             return;
         }
         
-        // 处理接收到的消息
+        // Process received message
         std::string message = beast::buffers_to_string(buffer_.data());
         buffer_.consume(bytes_transferred);
         
         if (server_) {
-            // 查找消息处理器
+            // Find message handler
             for (const auto& handler : server_->messageHandlers_) {
-                // 这里可以添加路径匹配逻辑
+                // Path matching logic can be added here
                 handler.second(clientId_, message, [this](const std::string& response) {
                     send(response);
                 });
             }
         }
         
-        // 继续读取
+        // Continue reading
         doRead();
     }
 
@@ -146,10 +146,10 @@ private:
             return;
         }
         
-        // 获取队列中的第一条消息
+        // Get first message from queue
         auto message = sendQueue_.front();
         
-        // 异步写入消息
+        // Asynchronously write message
         ws_.async_write(
             asio::buffer(message),
             beast::bind_front_handler(
@@ -158,6 +158,7 @@ private:
     }
 
     void onWrite(beast::error_code ec, std::size_t bytes_transferred) {
+        (void)bytes_transferred;
         if (ec) {
             std::cerr << "WebSocket write error: " << ec.message() << std::endl;
             if (server_) {
@@ -169,17 +170,17 @@ private:
             return;
         }
         
-        // 移除已发送的消息
+        // Remove sent message
         sendQueue_.pop_front();
         
-        // 继续发送队列中的下一条消息
+        // Continue sending next message in queue
         if (!sendQueue_.empty()) {
             doWrite();
         }
     }
 };
 
-// 内部Listener类实现
+// Internal Listener class implementation
 class WebSocketServer::Listener : public std::enable_shared_from_this<Listener> {
 public:
     static std::shared_ptr<Listener> create(asio::io_context& ioc, tcp::endpoint endpoint, WebSocketServer* server) {
@@ -202,28 +203,28 @@ private:
         
         beast::error_code ec;
         
-        // 打开acceptor
+        // Open acceptor
         acceptor_.open(endpoint.protocol(), ec);
         if (ec) {
             std::cerr << "Failed to open acceptor: " << ec.message() << std::endl;
             throw std::runtime_error("Failed to open acceptor: " + ec.message());
         }
         
-        // 设置地址重用
+        // Set address reuse
         acceptor_.set_option(asio::socket_base::reuse_address(true), ec);
         if (ec) {
             std::cerr << "Failed to set reuse address: " << ec.message() << std::endl;
             throw std::runtime_error("Failed to set reuse address: " + ec.message());
         }
         
-        // 绑定到端点
+        // Bind to endpoint
         acceptor_.bind(endpoint, ec);
         if (ec) {
             std::cerr << "Failed to bind to endpoint: " << ec.message() << std::endl;
             throw std::runtime_error("Failed to bind to endpoint: " + ec.message());
         }
         
-        // 开始监听
+        // Start listening
         acceptor_.listen(asio::socket_base::max_listen_connections, ec);
         if (ec) {
             std::cerr << "Failed to listen: " << ec.message() << std::endl;
@@ -243,11 +244,11 @@ private:
         if (ec) {
             std::cerr << "Accept error: " << ec.message() << std::endl;
         } else {
-            // 创建新的Session处理连接
+            // Create new Session to handle connection
             std::make_shared<Session>(std::move(socket), server_)->start();
         }
         
-        // 继续接受新的连接
+        // Continue accepting new connections
         doAccept();
     }
 
@@ -270,14 +271,14 @@ void WebSocketServer::start() {
         return;
     }
     
-    // 创建监听器
+    // Create listener
     tcp::endpoint endpoint(tcp::v4(), port_);
     impl_->listener_ = Listener::create(impl_->ioc_, endpoint, this);
     
-    // 启动监听器
+    // Start listener
     impl_->listener_->run();
     
-    // 启动工作线程
+    // Start worker threads
     for (unsigned int i = 0; i < threads_; ++i) {
         impl_->threads_.emplace_back([this]() {
             impl_->ioc_.run();
@@ -293,10 +294,10 @@ void WebSocketServer::stop() {
         return;
     }
     
-    // 停止io_context
+    // Stop io_context
     impl_->ioc_.stop();
     
-    // 等待所有线程结束
+    // Wait for all threads to finish
     for (auto& thread : impl_->threads_) {
         if (thread.joinable()) {
             thread.join();
@@ -344,8 +345,8 @@ void WebSocketServer::disconnectClient(const std::string& clientId) {
     std::lock_guard<std::mutex> lock(clientsMutex_);
     auto it = clients_.find(clientId);
     if (it != clients_.end()) {
-        // 这里应该关闭WebSocket连接
-        // 目前只是从列表中移除
+        // Should close WebSocket connection here
+        // Currently only removing from list
         clients_.erase(it);
     }
 }

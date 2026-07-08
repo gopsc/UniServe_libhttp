@@ -7,24 +7,24 @@ namespace pmc {
 namespace net {
 
 /**
- * @brief 基于 Boost.Beast 的异步 WebSocket 客户端（非 SSL 版本）
+ * @brief Asynchronous WebSocket client based on Boost.Beast (non-SSL version)
  */
 class WebSocketClient : public WebSocketClientBase {
 public:
     /**
-     * @brief 构造函数
-     * @param host 服务器主机名或 IP 地址
-     * @param port 服务器端口号
-     * @param path WebSocket 路径（默认 "/"）
+     * @brief Constructor
+     * @param host Server hostname or IP address
+     * @param port Server port number
+     * @param path WebSocket path (default "/")
      */
     WebSocketClient(const std::string& host, const std::string& port, const std::string& path = "/");
     
     /**
-     * @brief 析构函数
+     * @brief Destructor
      */
     ~WebSocketClient();
 
-    // 实现 WebSocketClientBase 接口
+    // Implement WebSocketClientBase interface
     void setMessageCallback(MessageCallback callback) override;
     void setErrorCallback(ErrorCallback callback) override;
     void setConnectCallback(ConnectCallback callback) override;
@@ -44,15 +44,15 @@ public:
     std::string getPort() const override;
     std::string getPath() const override;
 
-    // SSL/TLS 相关（非 SSL 版本返回默认值）
+    // SSL/TLS related (non-SSL version returns default values)
     bool isSecure() const override { return false; }
-    void setVerifyCertificate(bool verify) override { /* 忽略 */ }
-    void setCertificateFile(const std::string& cert_file) override { /* 忽略 */ }
-    void setPrivateKeyFile(const std::string& key_file) override { /* 忽略 */ }
-    void setCertificateAuthorityFile(const std::string& ca_file) override { /* 忽略 */ }
+    void setVerifyCertificate(bool verify) override { (void)verify;/* Ignored */ }
+    void setCertificateFile(const std::string& cert_file) override { (void)cert_file; /* Ignored */ }
+    void setPrivateKeyFile(const std::string& key_file) override { (void)key_file;/* Ignored */ }
+    void setCertificateAuthorityFile(const std::string& ca_file) override { (void)ca_file;/* Ignored */ }
 
 private:
-    // 前向声明实现类
+    // Forward declaration of implementation class
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

@@ -56,13 +56,6 @@ using MiddlewareHandler = std::function<bool(
 class HttpServer {
 public:
     /**
-     * @brief Constructor (listens on all interfaces)
-     * @param port Listening port
-     * @param threads Number of worker threads
-     */
-    explicit HttpServer(unsigned short port, unsigned int threads = 1);
-    
-    /**
      * @brief Constructor (specifies listening address)
      * @param address Listening IP address (e.g., "0.0.0.0" or "127.0.0.1")
      * @param port Listening port

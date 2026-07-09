@@ -1,7 +1,7 @@
 VERSION := 0.0.1
 FRAMEWORK_NAME := us
 LIB_NAME := libus_http
-INSTL_TDIR := /usr/lib
+INSTL_TDIR := /lib
 INCLU_TDIR := /usr/include
 INCLU_SDIR := inc
 CPP := g++

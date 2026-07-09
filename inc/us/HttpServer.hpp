@@ -31,6 +31,25 @@ namespace net {
  * @brief HTTP request handler type definition
  * 
  * Handles HTTP requests and returns responses
+ * 
+ * @param req The HTTP request object containing:
+ *            - method(): HTTP method (GET, POST, etc.)
+ *            - target(): Request URI path
+ *            - version(): HTTP version (11 for 1.1)
+ *            - body(): Request body content as string
+ *            - base(): Access to raw request fields
+ *            - at(): Access specific header fields
+ *            - find(): Find header field iterator
+ *            - count(): Check if header exists
+ * @param params A map of URL query parameters parsed from the request target.
+ *               Keys are parameter names, values are the corresponding decoded values.
+ *               For example, "?id=123&name=test" -> {"id":"123", "name":"test"}
+ * @return http::response<http::string_body> The HTTP response to be sent back to the client.
+ *         Should contain:
+ *         - result(): HTTP status code (e.g., http::status::ok)
+ *         - body(): Response content as string
+ *         - set(): Set response headers (e.g., Content-Type, Content-Length)
+ *         - prepare_payload(): Must be called after setting body and headers
  */
 using HttpRequestHandler = std::function<http::response<http::string_body>(
     const http::request<http::string_body>&,

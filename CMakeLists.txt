@@ -34,7 +34,7 @@ endif()
 message(STATUS "BOOST_ROOT: ${BOOST_ROOT}")
 
 # Set Boost include directory
-set(Boost_INCLUDE_DIR "${BOOST_ROOT}/include" CACHE PATH "Boost include directory")
+set(Boost_INCLUDE_DIR "${BOOST_ROOT}" CACHE PATH "Boost include directory")
 
 message(STATUS "Boost include directory: ${Boost_INCLUDE_DIR}")
 

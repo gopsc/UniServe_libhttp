@@ -8,22 +8,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Set compiler flags based on compiler type
 if(MSVC)
-    # /O2: Optimize for speed
-    # /W4: Warning level 4
-    # /bigobj: Increase section limit in object files (required for Boost)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /O2 /W4 /bigobj")
 else()
-    # GCC/Clang
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -pipe -Wall")
 endif()
 
-# Set library name
-set(LIB_NAME "us_http")
+# Set library names
+set(SHARED_LIB_NAME "us_http")
+set(STATIC_LIB_NAME "us_http_static")
 set(FRAMEWORK_NAME "us")
 
 # ===== Boost Library Configuration (Header-Only) =====
-
-# Set Boost root directory
 if(DEFINED ENV{BOOST_ROOT})
     set(BOOST_ROOT $ENV{BOOST_ROOT})
     message(STATUS "Using BOOST_ROOT from environment: ${BOOST_ROOT}")
@@ -33,17 +28,13 @@ endif()
 
 message(STATUS "BOOST_ROOT: ${BOOST_ROOT}")
 
-# Set Boost include directory
 set(Boost_INCLUDE_DIR "${BOOST_ROOT}" CACHE PATH "Boost include directory")
-
 message(STATUS "Boost include directory: ${Boost_INCLUDE_DIR}")
 
-# Check if include directory exists
 if(NOT EXISTS ${Boost_INCLUDE_DIR})
     message(FATAL_ERROR "Boost include directory not found: ${Boost_INCLUDE_DIR}")
 endif()
 
-# Add Boost include directory (header-only libraries)
 include_directories(${Boost_INCLUDE_DIR})
 
 # Include directory (project headers)
@@ -65,52 +56,63 @@ set(HEADERS
     inc/${FRAMEWORK_NAME}/WebSocketClient.hpp
 )
 
-# Create shared library
-add_library(${LIB_NAME} SHARED ${SOURCES})
+# Create shared library (DLL)
+add_library(${SHARED_LIB_NAME} SHARED ${SOURCES})
 
-# Additional Windows system libraries (for socket/network functions)
+# Create static library (LIB)
+add_library(${STATIC_LIB_NAME} STATIC ${SOURCES})
+
+# Set properties for shared library
 if(WIN32)
-    target_link_libraries(${LIB_NAME} 
-        ws2_32    # Windows Socket API
-        # crypt32  # If you need encryption
-        # bcrypt   # Windows Cryptography API
+    target_link_libraries(${SHARED_LIB_NAME} 
+        ws2_32
     )
 else()
-    # Linux/Mac - pthread for threading
-    target_link_libraries(${LIB_NAME} 
+    target_link_libraries(${SHARED_LIB_NAME} 
         pthread
     )
 endif()
 
-# Set position independent code for shared library
-if(UNIX AND NOT APPLE)
-    set_target_properties(${LIB_NAME} PROPERTIES
-        POSITION_INDEPENDENT_CODE ON
-    )
-endif()
-
-# Set output directory
-set_target_properties(${LIB_NAME} PROPERTIES
+# Set output directories
+set_target_properties(${SHARED_LIB_NAME} ${STATIC_LIB_NAME} PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build"
 )
 
-# Set suffix for Windows
+# Additional properties for Windows
 if(WIN32)
-    set_target_properties(${LIB_NAME} PROPERTIES
+    set_target_properties(${SHARED_LIB_NAME} PROPERTIES
         PREFIX ""
         SUFFIX ".dll"
     )
+    set_target_properties(${STATIC_LIB_NAME} PROPERTIES
+        PREFIX ""
+        SUFFIX ".lib"
+    )
 else()
-    set_target_properties(${LIB_NAME} PROPERTIES
+    set_target_properties(${SHARED_LIB_NAME} PROPERTIES
         PREFIX "lib"
         SUFFIX ".so"
+    )
+    set_target_properties(${STATIC_LIB_NAME} PROPERTIES
+        PREFIX "lib"
+        SUFFIX ".a"
+    )
+endif()
+
+# Position independent code for static library on Unix
+if(UNIX AND NOT APPLE)
+    set_target_properties(${STATIC_LIB_NAME} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+    )
+    set_target_properties(${SHARED_LIB_NAME} PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
     )
 endif()
 
 # Install targets
-install(TARGETS ${LIB_NAME}
+install(TARGETS ${SHARED_LIB_NAME} ${STATIC_LIB_NAME}
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
     ARCHIVE DESTINATION lib
@@ -131,7 +133,8 @@ add_custom_target(clear
 message(STATUS "========================================")
 message(STATUS "Project: ${PROJECT_NAME}")
 message(STATUS "Version: ${PROJECT_VERSION}")
-message(STATUS "Library: ${LIB_NAME}")
+message(STATUS "Shared library: ${SHARED_LIB_NAME}")
+message(STATUS "Static library: ${STATIC_LIB_NAME}")
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS "Compiler: ${CMAKE_CXX_COMPILER_ID}")
@@ -139,6 +142,4 @@ if(MSVC)
     message(STATUS "MSVC version: ${MSVC_VERSION}")
 endif()
 message(STATUS "BOOST_ROOT: ${BOOST_ROOT}")
-message(STATUS "Boost include: ${Boost_INCLUDE_DIR}")
-message(STATUS "Boost libraries: Header-only (no linking required)")
 message(STATUS "========================================")

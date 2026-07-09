@@ -19,67 +19,18 @@
 #include <mutex>
 #include <chrono>
 
+namespace pmc {
+namespace net {
+
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace asio = boost::asio;
 using tcp = boost::asio::ip::tcp;
 
-namespace pmc {
-namespace net {
-
 /**
  * @brief HTTP request handler type definition
  * 
  * Handles HTTP requests and returns responses
- * 
- * @param req The HTTP request object. Interface:
- *            - http::request<http::string_body> (template type)
- *            - method() -> http::verb: Returns the HTTP method (GET, POST, etc.)
- *            - target() -> std::string: Returns the request URI path
- *            - version() -> unsigned: Returns HTTP version (11 for 1.1, 10 for 1.0)
- *            - body() -> std::string&: Returns the request body content
- *            - body() const -> const std::string&: Returns the request body content (const)
- *            - base() -> http::header&: Access to raw header fields
- *            - base() const -> const http::header&: Access to raw header fields (const)
- *            - at(string) -> std::string&: Access specific header field by name
- *            - at(string) const -> const std::string&: Access specific header field by name (const)
- *            - find(string) -> iterator: Find header field by name
- *            - find(string) const -> const_iterator: Find header field by name (const)
- *            - count(string) -> size_t: Check if header field exists (returns 0 or 1)
- *            - begin() -> iterator: Returns iterator to the beginning of headers
- *            - end() -> iterator: Returns iterator to the end of headers
- *            - cbegin() const -> const_iterator: Returns const iterator to the beginning
- *            - cend() const -> const_iterator: Returns const iterator to the end
- * @param params A map of URL query parameters parsed from the request target.
- *               Interface: std::unordered_map<std::string, std::string>
- *               - Keys are parameter names (decoded)
- *               - Values are the corresponding decoded values
- *               - Example: "?id=123&name=test" -> {"id":"123", "name":"test"}
- *               - Empty map if no query parameters exist
- * @return http::response<http::string_body> The HTTP response to be sent back to the client.
- *         Interface:
- *         - http::response<http::string_body> (template type)
- *         - result() -> http::status: Sets or gets the HTTP status code
- *         - result(http::status) -> void: Sets the HTTP status code
- *         - reason() -> std::string&: Returns the reason phrase
- *         - reason(string) -> void: Sets the reason phrase
- *         - body() -> std::string&: Returns the response body content
- *         - body() const -> const std::string&: Returns the response body content (const)
- *         - body(string) -> void: Sets the response body content
- *         - set(string, string) -> void: Sets a header field (name, value)
- *         - at(string) -> std::string&: Access specific header field by name
- *         - at(string) const -> const std::string&: Access specific header field by name (const)
- *         - find(string) -> iterator: Find header field by name
- *         - find(string) const -> const_iterator: Find header field by name (const)
- *         - count(string) -> size_t: Check if header field exists
- *         - begin() -> iterator: Returns iterator to the beginning of headers
- *         - end() -> iterator: Returns iterator to the end of headers
- *         - cbegin() const -> const_iterator: Returns const iterator to the beginning
- *         - cend() const -> const_iterator: Returns const iterator to the end
- *         - prepare_payload() -> void: MUST be called after setting body and headers.
- *           This function calculates and sets the Content-Length and Content-MD5 fields.
- *         - keep_alive() -> bool: Returns true if the connection should be kept alive
- *         - need_eof() -> bool: Returns true if the connection should be closed after sending
  */
 using HttpRequestHandler = std::function<http::response<http::string_body>(
     const http::request<http::string_body>&,
@@ -195,6 +146,12 @@ public:
      */
     void showStatus() const;
 
+    /* debug tools */
+    class debug {
+    public:
+	static void print_all_header_fields(const http::request<http::string_body>& req);
+    };
+
 private:
     // Internal class declarations
     class Session;
@@ -239,6 +196,7 @@ private:
     void addSession(const std::shared_ptr<Session>& session);
     void removeSession(const Session* session);
     void closeAllSessions();
+
 };
 
 } // namespace net

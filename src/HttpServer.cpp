@@ -431,5 +431,12 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
     return response;
 }
 
+	void HttpServer::debug::print_all_header_fields(const http::request<http::string_body>& req) {
+		for (auto const& field: req) {
+			std::cout << "Name: " << field.name_string()
+			<< ", Value: " << field.value() << std::endl;
+		}
+	}
+
 } // namespace net
 } // namespace pmc

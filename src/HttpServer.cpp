@@ -1,3 +1,4 @@
+// HttpServer.cpp
 #include "us/HttpServer.hpp"
 #include <boost/algorithm/string.hpp>
 #include <fstream>
@@ -211,20 +212,110 @@ void HttpServer::stop() {
     std::cout << "HTTP Server stopped" << std::endl;
 }
 
+// Convert wildcard pattern to regex
+std::regex HttpServer::wildcardToRegex(const std::string& pattern) {
+    std::string regex_pattern;
+    regex_pattern.reserve(pattern.size() * 2);
+    
+    for (char c : pattern) {
+        if (c == '*') {
+            regex_pattern += ".*";
+        } else if (c == '?') {
+            regex_pattern += ".";
+        } else if (c == '.' || c == '+' || c == '(' || c == ')' || 
+                   c == '[' || c == ']' || c == '{' || c == '}' || 
+                   c == '^' || c == '$' || c == '|' || c == '\\') {
+            regex_pattern += '\\';
+            regex_pattern += c;
+        } else {
+            regex_pattern += c;
+        }
+    }
+    
+    return std::regex(regex_pattern, std::regex::icase);
+}
+
+// Match path against regex pattern
+bool HttpServer::matchPath(const std::string& path, const std::regex& pattern) {
+    return std::regex_match(path, pattern);
+}
+
+// Find matching route
+HttpRequestHandler HttpServer::findRoute(const std::string& method, const std::string& path) {
+    const std::vector<RouteEntry>* handlers = nullptr;
+    
+    if (method == "GET") {
+        handlers = &get_handlers_;
+    } else if (method == "POST") {
+        handlers = &post_handlers_;
+    } else if (method == "PUT") {
+        handlers = &put_handlers_;
+    } else if (method == "DELETE") {
+        handlers = &delete_handlers_;
+    } else {
+        return nullptr;
+    }
+    
+    // First try exact match
+    for (const auto& entry : *handlers) {
+        if (!entry.is_wildcard && entry.path == path) {
+            return entry.handler;
+        }
+    }
+    
+    // Then try wildcard match
+    for (const auto& entry : *handlers) {
+        if (entry.is_wildcard && matchPath(path, entry.pattern)) {
+            return entry.handler;
+        }
+    }
+    
+    return nullptr;
+}
+
+// Register handlers with wildcard support
 void HttpServer::get(const std::string& path, HttpRequestHandler handler) {
-    get_handlers_[path] = handler;
+    RouteEntry entry;
+    entry.path = path;
+    entry.handler = handler;
+    entry.is_wildcard = (path.find('*') != std::string::npos || path.find('?') != std::string::npos);
+    if (entry.is_wildcard) {
+        entry.pattern = wildcardToRegex(path);
+    }
+    get_handlers_.push_back(entry);
 }
 
 void HttpServer::post(const std::string& path, HttpRequestHandler handler) {
-    post_handlers_[path] = handler;
+    RouteEntry entry;
+    entry.path = path;
+    entry.handler = handler;
+    entry.is_wildcard = (path.find('*') != std::string::npos || path.find('?') != std::string::npos);
+    if (entry.is_wildcard) {
+        entry.pattern = wildcardToRegex(path);
+    }
+    post_handlers_.push_back(entry);
 }
 
 void HttpServer::put(const std::string& path, HttpRequestHandler handler) {
-    put_handlers_[path] = handler;
+    RouteEntry entry;
+    entry.path = path;
+    entry.handler = handler;
+    entry.is_wildcard = (path.find('*') != std::string::npos || path.find('?') != std::string::npos);
+    if (entry.is_wildcard) {
+        entry.pattern = wildcardToRegex(path);
+    }
+    put_handlers_.push_back(entry);
 }
 
 void HttpServer::del(const std::string& path, HttpRequestHandler handler) {
-    delete_handlers_[path] = handler;
+    RouteEntry entry;
+    entry.path = path;
+    entry.handler = handler;
+    entry.is_wildcard = (path.find('*') != std::string::npos || path.find('?') != std::string::npos);
+    if (entry.is_wildcard) {
+        entry.pattern = wildcardToRegex(path);
+    }
+    delete_handlers_.push_back(entry);
 }
 
 void HttpServer::use(MiddlewareHandler middleware) {
@@ -263,20 +354,20 @@ void HttpServer::showStatus() const {
     std::cout << "Static Directory: " << (static_directory_.empty() ? "Not set" : static_directory_) << std::endl;
     std::cout << "Registered Routes:" << std::endl;
     std::cout << "  GET: " << get_handlers_.size() << " handler(s)" << std::endl;
-    for (const auto& [path, _] : get_handlers_) {
-        std::cout << "    GET " << path << std::endl;
+    for (const auto& entry : get_handlers_) {
+        std::cout << "    GET " << entry.path << (entry.is_wildcard ? " (wildcard)" : "") << std::endl;
     }
     std::cout << "  POST: " << post_handlers_.size() << " handler(s)" << std::endl;
-    for (const auto& [path, _] : post_handlers_) {
-        std::cout << "    POST " << path << std::endl;
+    for (const auto& entry : post_handlers_) {
+        std::cout << "    POST " << entry.path << (entry.is_wildcard ? " (wildcard)" : "") << std::endl;
     }
     std::cout << "  PUT: " << put_handlers_.size() << " handler(s)" << std::endl;
-    for (const auto& [path, _] : put_handlers_) {
-        std::cout << "    PUT " << path << std::endl;
+    for (const auto& entry : put_handlers_) {
+        std::cout << "    PUT " << entry.path << (entry.is_wildcard ? " (wildcard)" : "") << std::endl;
     }
     std::cout << "  DELETE: " << delete_handlers_.size() << " handler(s)" << std::endl;
-    for (const auto& [path, _] : delete_handlers_) {
-        std::cout << "    DELETE " << path << std::endl;
+    for (const auto& entry : delete_handlers_) {
+        std::cout << "    DELETE " << entry.path << (entry.is_wildcard ? " (wildcard)" : "") << std::endl;
     }
     std::cout << "Middlewares: " << middlewares_.size() << std::endl;
     std::cout << "==========================" << std::endl;
@@ -343,41 +434,11 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
         return response;
     }
     
-    // Find route handler
-    HttpRequestHandler handler = nullptr;
+    // Get HTTP method as string
+    std::string method_str = http::to_string(req.method());
     
-    switch (req.method()) {
-        case http::verb::get: {
-            auto it = get_handlers_.find(target_path);
-            if (it != get_handlers_.end()) {
-                handler = it->second;
-            }
-            break;
-        }
-        case http::verb::post: {
-            auto it = post_handlers_.find(target_path);
-            if (it != post_handlers_.end()) {
-                handler = it->second;
-            }
-            break;
-        }
-        case http::verb::put: {
-            auto it = put_handlers_.find(target_path);
-            if (it != put_handlers_.end()) {
-                handler = it->second;
-            }
-            break;
-        }
-        case http::verb::delete_: {
-            auto it = delete_handlers_.find(target_path);
-            if (it != delete_handlers_.end()) {
-                handler = it->second;
-            }
-            break;
-        }
-        default:
-            break;
-    }
+    // Find route handler (supports wildcards)
+    HttpRequestHandler handler = findRoute(method_str, target_path);
     
     // Handle static files
     if (!handler && !static_directory_.empty()) {
@@ -431,12 +492,12 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
     return response;
 }
 
-	void HttpServer::debug::print_all_header_fields(const http::request<http::string_body>& req) {
-		for (auto const& field: req) {
-			std::cout << "Name: " << field.name_string()
-			<< ", Value: " << field.value() << std::endl;
-		}
-	}
+void HttpServer::debug::print_all_header_fields(const http::request<http::string_body>& req) {
+    for (auto const& field: req) {
+        std::cout << "Name: " << field.name_string()
+                  << ", Value: " << field.value() << std::endl;
+    }
+}
 
 } // namespace net
 } // namespace pmc

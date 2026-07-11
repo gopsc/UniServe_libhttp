@@ -1,3 +1,4 @@
+// HttpServer.hpp
 #ifndef HTTPSERVER_HPP
 #define HTTPSERVER_HPP
 
@@ -18,6 +19,7 @@
 #include <atomic>
 #include <mutex>
 #include <chrono>
+#include <regex>
 
 namespace pmc {
 namespace net {
@@ -45,6 +47,16 @@ using MiddlewareHandler = std::function<bool(
     const http::request<http::string_body>&,
     http::response<http::string_body>&,
     const std::unordered_map<std::string, std::string>&)>;
+
+/**
+ * @brief Route entry structure
+ */
+struct RouteEntry {
+    std::string path;
+    std::regex pattern;
+    HttpRequestHandler handler;
+    bool is_wildcard;
+};
 
 /**
  * @brief HTTP Server class (enhanced merged version)
@@ -80,28 +92,28 @@ public:
     
     /**
      * @brief Register GET request handler
-     * @param path Request path
+     * @param path Request path (supports wildcards: * and ?)
      * @param handler Request handler
      */
     void get(const std::string& path, HttpRequestHandler handler);
     
     /**
      * @brief Register POST request handler
-     * @param path Request path
+     * @param path Request path (supports wildcards: * and ?)
      * @param handler Request handler
      */
     void post(const std::string& path, HttpRequestHandler handler);
     
     /**
      * @brief Register PUT request handler
-     * @param path Request path
+     * @param path Request path (supports wildcards: * and ?)
      * @param handler Request handler
      */
     void put(const std::string& path, HttpRequestHandler handler);
     
     /**
      * @brief Register DELETE request handler
-     * @param path Request path
+     * @param path Request path (supports wildcards: * and ?)
      * @param handler Request handler
      */
     void del(const std::string& path, HttpRequestHandler handler);
@@ -149,7 +161,7 @@ public:
     /* debug tools */
     class debug {
     public:
-	static void print_all_header_fields(const http::request<http::string_body>& req);
+        static void print_all_header_fields(const http::request<http::string_body>& req);
     };
 
 private:
@@ -170,11 +182,11 @@ private:
     std::shared_ptr<Listener> listener_;
     std::vector<std::thread> worker_threads_;
     
-    // Route tables
-    std::unordered_map<std::string, HttpRequestHandler> get_handlers_;
-    std::unordered_map<std::string, HttpRequestHandler> post_handlers_;
-    std::unordered_map<std::string, HttpRequestHandler> put_handlers_;
-    std::unordered_map<std::string, HttpRequestHandler> delete_handlers_;
+    // Route tables (supports wildcards)
+    std::vector<RouteEntry> get_handlers_;
+    std::vector<RouteEntry> post_handlers_;
+    std::vector<RouteEntry> put_handlers_;
+    std::vector<RouteEntry> delete_handlers_;
     
     // Middleware chain
     std::vector<MiddlewareHandler> middlewares_;
@@ -189,8 +201,15 @@ private:
     // Internal methods
     std::unordered_map<std::string, std::string> parseQueryParams(const std::string& query);
     
+    // Wildcard matching
+    std::regex wildcardToRegex(const std::string& pattern);
+    bool matchPath(const std::string& path, const std::regex& pattern);
+    
     // Request handling
     http::response<http::string_body> handleRequest(const http::request<http::string_body>& req);
+    
+    // Route finding
+    HttpRequestHandler findRoute(const std::string& method, const std::string& path);
     
     // Session management
     void addSession(const std::shared_ptr<Session>& session);

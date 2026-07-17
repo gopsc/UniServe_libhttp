@@ -1,4 +1,3 @@
-// HttpServer.hpp
 #ifndef HTTPSERVER_HPP
 #define HTTPSERVER_HPP
 
@@ -8,6 +7,7 @@
 #include <boost/beast/version.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/config.hpp>
 #include <memory>
 #include <string>
@@ -20,6 +20,7 @@
 #include <mutex>
 #include <chrono>
 #include <regex>
+#include <variant>
 
 namespace pmc {
 namespace net {
@@ -58,22 +59,35 @@ struct RouteEntry {
     bool is_wildcard;
 };
 
+// Forward declaration for Session
+class HttpServer;
+
 /**
- * @brief HTTP Server class (enhanced merged version)
+ * @brief HTTP/HTTPS Server class
  * 
- * Asynchronous HTTP server based on boost::asio and boost::beast
- * Combines ease of use from original version with functional completeness
- * of the fixed version
+ * Asynchronous HTTP/HTTPS server based on boost::asio and boost::beast
  */
 class HttpServer {
 public:
     /**
-     * @brief Constructor (specifies listening address)
+     * @brief Constructor for HTTP (no SSL)
      * @param address Listening IP address (e.g., "0.0.0.0" or "127.0.0.1")
      * @param port Listening port
      * @param threads Number of worker threads
      */
     explicit HttpServer(const std::string& address, unsigned short port, unsigned int threads = 1);
+    
+    /**
+     * @brief Constructor for HTTPS (with SSL)
+     * @param address Listening IP address
+     * @param port Listening port
+     * @param cert_file SSL certificate file path
+     * @param key_file SSL private key file path
+     * @param threads Number of worker threads
+     */
+    explicit HttpServer(const std::string& address, unsigned short port, 
+                       const std::string& cert_file, const std::string& key_file, 
+                       unsigned int threads = 1);
     
     /**
      * @brief Destructor
@@ -149,12 +163,18 @@ public:
     std::string getAddress() const;
     
     /**
-     * @brief Run the server (blocking call) - inherited from original version
+     * @brief Check if SSL is enabled
+     * @return true if SSL is enabled
+     */
+    bool isSSLEnabled() const;
+    
+    /**
+     * @brief Run the server (blocking call)
      */
     void run();
     
     /**
-     * @brief Display server status information - inherited from original version
+     * @brief Display server status information
      */
     void showStatus() const;
 
@@ -174,6 +194,14 @@ private:
     unsigned short port_;
     unsigned int threads_;
     std::atomic<bool> running_{false};
+    
+    // SSL configuration
+    bool ssl_enabled_{false};
+    std::string cert_file_;
+    std::string key_file_;
+    
+    // SSL context
+    std::unique_ptr<asio::ssl::context> ssl_ctx_;
     
     // Boost.Asio context
     std::unique_ptr<asio::io_context> ioc_;
@@ -215,7 +243,9 @@ private:
     void addSession(const std::shared_ptr<Session>& session);
     void removeSession(const Session* session);
     void closeAllSessions();
-
+    
+    // Helper to create SSL context
+    void initSSLContext();
 };
 
 } // namespace net

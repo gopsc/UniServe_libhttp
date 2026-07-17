@@ -1,8 +1,9 @@
-// HttpServer.cpp
 #include "us/HttpServer.hpp"
 #include <boost/algorithm/string.hpp>
+#include <boost/asio/ssl/verify_context.hpp>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 
 namespace pmc {
 namespace net {
@@ -20,6 +21,13 @@ class HttpListenerException: public HttpServerException {
         : HttpServerException(msg) {}
 };
 
+/* SSL initialization exception */
+class SSLInitException: public HttpServerException {
+    public:
+        explicit SSLInitException(const std::string& msg)
+        : HttpServerException(msg) {}
+};
+
 /* Failed to create IO_CONTEXT */
 class CreateObjectFailed: public HttpServerException {
     public:
@@ -27,43 +35,100 @@ class CreateObjectFailed: public HttpServerException {
         : HttpServerException(msg) {}
 };
 
-
-// Session class - handles individual HTTP connections
+// Session class - handles individual HTTP/HTTPS connections
 class HttpServer::Session : public std::enable_shared_from_this<Session> {
 public:
+    // HTTP constructor (without SSL) - 使用移动语义
     Session(tcp::socket&& socket, HttpServer* server)
-        : socket_(std::move(socket)), server_(server) {
+        : socket_(std::move(socket)), 
+          server_(server), 
+          ssl_enabled_(false) {
+    }
+    
+    // HTTPS constructor (with SSL) - 使用移动语义
+    Session(tcp::socket&& socket, asio::ssl::context& ssl_ctx, HttpServer* server)
+        : socket_(std::move(socket)), 
+          server_(server), 
+          ssl_enabled_(true) {
+        // 在构造函数中初始化 SSL stream，使用已移动的 socket
+        ssl_stream_ = std::make_unique<asio::ssl::stream<tcp::socket>>(
+            std::move(socket_), ssl_ctx);
+    }
+    
+    ~Session() {
+        close();
     }
     
     void run() {
-        doRead();
+        if (ssl_enabled_) {
+            doSSLHandshake();
+        } else {
+            doRead();
+        }
     }
     
 private:
-    void doRead() {
+    void close() {
+        beast::error_code ec;
+        if (ssl_enabled_ && ssl_stream_) {
+            ssl_stream_->lowest_layer().shutdown(tcp::socket::shutdown_send, ec);
+            ssl_stream_->lowest_layer().close(ec);
+        } else if (socket_.is_open()) {
+            socket_.shutdown(tcp::socket::shutdown_send, ec);
+            socket_.close(ec);
+        }
+    }
+    
+    void doSSLHandshake() {
         auto self = shared_from_this();
-        http::async_read(socket_, buffer_, request_,
-            [this, self](beast::error_code ec, std::size_t) {
+        ssl_stream_->async_handshake(
+            asio::ssl::stream_base::server,
+            [this, self](beast::error_code ec) {
                 if (!ec) {
-                    processRequest();
-                } else if (ec != http::error::end_of_stream) {
-                    // Error handling
+                    doRead();
+                } else {
+                    std::cerr << "SSL handshake error: " << ec.message() << std::endl;
                 }
             });
     }
     
-    void processRequest() {
+    void doRead() {
+        auto self = shared_from_this();
+        
+        if (ssl_enabled_ && ssl_stream_) {
+            http::async_read(*ssl_stream_, buffer_, request_,
+                [this, self](beast::error_code ec, std::size_t bytes_transferred) {
+                    handleRead(ec);
+                });
+        } else {
+            http::async_read(socket_, buffer_, request_,
+                [this, self](beast::error_code ec, std::size_t bytes_transferred) {
+                    handleRead(ec);
+                });
+        }
+    }
+    
+    void handleRead(beast::error_code ec) {
+        if (!ec) {
+            // 复制请求对象，避免被后续请求覆盖
+            http::request<http::string_body> req_copy = std::move(request_);
+            request_ = http::request<http::string_body>();
+            processRequest(std::move(req_copy));
+        } else if (ec != http::error::end_of_stream) {
+            std::cerr << "Read error: " << ec.message() << std::endl;
+        }
+    }
+    
+    void processRequest(http::request<http::string_body> req) {
         try {
-            // Create response object
             auto response = std::make_shared<http::response<http::string_body>>(
-                server_->handleRequest(request_)
+                server_->handleRequest(req)
             );
             doWrite(response);
         } catch (const std::exception& e) {
             std::cerr << "Error processing request: " << e.what() << std::endl;
-            // Send error response
             auto error_response = std::make_shared<http::response<http::string_body>>();
-            error_response->version(request_.version());
+            error_response->version(req.version());
             error_response->result(http::status::internal_server_error);
             error_response->set(http::field::content_type, "text/plain");
             error_response->body() = "500 Internal Server Error\n";
@@ -74,30 +139,65 @@ private:
     
     void doWrite(std::shared_ptr<http::response<http::string_body>> response) {
         auto self = shared_from_this();
-        http::async_write(socket_, *response,
-            [this, self, response](beast::error_code ec, std::size_t) {
-                if (!ec) {
-                    // Check if connection should be kept alive
-                    if (!response->keep_alive()) {
-                        socket_.shutdown(tcp::socket::shutdown_send, ec);
-                    }
-                }
-                // Continue reading next request
+        
+        auto write_callback = [this, self, response](beast::error_code ec, std::size_t) {
+            if (ec) {
+                std::cerr << "Write error: " << ec.message() << std::endl;
+                return;
+            }
+            
+            bool keep_alive = response->keep_alive();
+            if (!keep_alive) {
+                close();
+            } else {
                 doRead();
-            });
+            }
+        };
+        
+        if (ssl_enabled_ && ssl_stream_) {
+            http::async_write(*ssl_stream_, *response, write_callback);
+        } else {
+            http::async_write(socket_, *response, write_callback);
+        }
     }
     
+    // HTTP socket (non-SSL) - 注意：对于SSL连接，这个socket会被移动到ssl_stream_中
     tcp::socket socket_;
+    
+    // SSL stream (SSL) - 使用unique_ptr管理
+    std::unique_ptr<asio::ssl::stream<tcp::socket>> ssl_stream_;
+    
     beast::flat_buffer buffer_;
     http::request<http::string_body> request_;
     HttpServer* server_;
+    bool ssl_enabled_;
 };
 
 // Listener class - accepts new connections
 class HttpServer::Listener : public std::enable_shared_from_this<Listener> {
 public:
+    // HTTP listener
     Listener(asio::io_context& ioc, tcp::endpoint endpoint, HttpServer* server)
-        : ioc_(ioc), acceptor_(ioc), server_(server) {
+        : ioc_(ioc), acceptor_(ioc), server_(server), ssl_enabled_(false) {
+        initAcceptor(endpoint);
+    }
+    
+    // HTTPS listener
+    Listener(asio::io_context& ioc, tcp::endpoint endpoint, 
+             asio::ssl::context& ssl_ctx, HttpServer* server)
+        : ioc_(ioc), acceptor_(ioc), ssl_ctx_(&ssl_ctx), 
+          server_(server), ssl_enabled_(true) {
+        initAcceptor(endpoint);
+    }
+    
+    void run() {
+        if (acceptor_.is_open()) {
+            doAccept();
+        }
+    }
+    
+private:
+    void initAcceptor(tcp::endpoint endpoint) {
         beast::error_code ec;
         acceptor_.open(endpoint.protocol(), ec);
         
@@ -109,26 +209,24 @@ public:
             }
         }
         if (ec) {
-                std::string errmsg = "Listener error: ";
-                errmsg += ec.message();
-                errmsg += "\n";
-                throw HttpListenerException(errmsg);
+            std::string errmsg = "Listener error: ";
+            errmsg += ec.message();
+            errmsg += "\n";
+            throw HttpListenerException(errmsg);
         }
     }
     
-    void run() {
-        if (acceptor_.is_open()) {
-            doAccept();
-        }
-    }
-
-    
-private:
     void doAccept() {
         acceptor_.async_accept(
             [this, self = shared_from_this()](beast::error_code ec, tcp::socket socket) {
                 if (!ec) {
-                    std::make_shared<Session>(std::move(socket), server_)->run();
+                    if (ssl_enabled_ && ssl_ctx_) {
+                        std::make_shared<Session>(std::move(socket), *ssl_ctx_, server_)->run();
+                    } else {
+                        std::make_shared<Session>(std::move(socket), server_)->run();
+                    }
+                } else {
+                    std::cerr << "Accept error: " << ec.message() << std::endl;
                 }
                 doAccept();
             });
@@ -136,20 +234,61 @@ private:
     
     asio::io_context& ioc_;
     tcp::acceptor acceptor_;
+    asio::ssl::context* ssl_ctx_{nullptr};
     HttpServer* server_;
+    bool ssl_enabled_;
 };
 
-// HttpServer implementation - constructor (specifies listening address and thread count)
+// HttpServer implementation - HTTP constructor
 HttpServer::HttpServer(const std::string& address, unsigned short port, unsigned int threads)
-    : address_(address), port_(port), threads_(threads), 
+    : address_(address), port_(port), threads_(threads), ssl_enabled_(false),
       ioc_(std::make_unique<asio::io_context>(threads)) {
     if (!ioc_) {
         throw CreateObjectFailed("Failed to create io_context");
     }
 }
 
+// HttpServer implementation - HTTPS constructor
+HttpServer::HttpServer(const std::string& address, unsigned short port, 
+                       const std::string& cert_file, const std::string& key_file,
+                       unsigned int threads)
+    : address_(address), port_(port), threads_(threads), 
+      ssl_enabled_(true), cert_file_(cert_file), key_file_(key_file),
+      ioc_(std::make_unique<asio::io_context>(threads)) {
+    if (!ioc_) {
+        throw CreateObjectFailed("Failed to create io_context");
+    }
+    initSSLContext();
+}
+
 HttpServer::~HttpServer() {
     stop();
+}
+
+void HttpServer::initSSLContext() {
+    if (!ssl_enabled_) return;
+    
+    try {
+        ssl_ctx_ = std::make_unique<asio::ssl::context>(asio::ssl::context::tlsv12);
+        
+        // 设置SSL选项
+        ssl_ctx_->set_options(
+            asio::ssl::context::default_workarounds |
+            asio::ssl::context::no_sslv2 |
+            asio::ssl::context::no_sslv3 |
+            asio::ssl::context::single_dh_use);
+        
+        // 加载证书文件
+        ssl_ctx_->use_certificate_chain_file(cert_file_);
+        
+        // 加载私钥文件
+        ssl_ctx_->use_private_key_file(key_file_, asio::ssl::context::pem);
+        
+        std::cout << "SSL/TLS initialized successfully" << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "SSL initialization failed: " << e.what() << std::endl;
+        throw SSLInitException("Failed to initialize SSL context");
+    }
 }
 
 void HttpServer::start() {
@@ -158,13 +297,17 @@ void HttpServer::start() {
     }
     
     try {
-        // Create endpoint (using specified address and port)
+        // Create endpoint
         asio::ip::address ip_address = asio::ip::make_address(address_);
         tcp::endpoint endpoint(ip_address, port_);
         
-        // Create listener
-        listener_ = std::make_shared<Listener>(*ioc_, endpoint, this);
-
+        // Create listener based on SSL configuration
+        if (ssl_enabled_ && ssl_ctx_) {
+            listener_ = std::make_shared<Listener>(*ioc_, endpoint, *ssl_ctx_, this);
+        } else {
+            listener_ = std::make_shared<Listener>(*ioc_, endpoint, this);
+        }
+        
         if (!listener_) {
             throw CreateObjectFailed("Failed to create listener");
         }
@@ -183,8 +326,12 @@ void HttpServer::start() {
             });
         }
         
-        std::cout << "HTTP Server started on " << address_ << ":" << port_ 
-                  << " with " << threads_ << " threads" << std::endl;
+        std::cout << (ssl_enabled_ ? "HTTPS" : "HTTP") << " Server started on " 
+                  << address_ << ":" << port_ << " with " << threads_ << " threads" << std::endl;
+        if (ssl_enabled_) {
+            std::cout << "SSL Certificate: " << cert_file_ << std::endl;
+            std::cout << "SSL Private Key: " << key_file_ << std::endl;
+        }
     } catch (const std::exception& e) {
         std::cerr << "Failed to start server: " << e.what() << std::endl;
         running_ = false;
@@ -198,6 +345,9 @@ void HttpServer::stop() {
     
     running_ = false;
     
+    // 关闭所有会话
+    closeAllSessions();
+    
     if (ioc_) {
         ioc_->stop();
     }
@@ -209,7 +359,11 @@ void HttpServer::stop() {
     }
     worker_threads_.clear();
     
-    std::cout << "HTTP Server stopped" << std::endl;
+    if (listener_) {
+        listener_.reset();
+    }
+    
+    std::cout << (ssl_enabled_ ? "HTTPS" : "HTTP") << " Server stopped" << std::endl;
 }
 
 // Convert wildcard pattern to regex
@@ -338,6 +492,10 @@ std::string HttpServer::getAddress() const {
     return address_;
 }
 
+bool HttpServer::isSSLEnabled() const {
+    return ssl_enabled_;
+}
+
 void HttpServer::run() {
     start();
     if (ioc_) {
@@ -346,11 +504,16 @@ void HttpServer::run() {
 }
 
 void HttpServer::showStatus() const {
-    std::cout << "=== HTTP Server Status ===" << std::endl;
+    std::cout << "=== " << (ssl_enabled_ ? "HTTPS" : "HTTP") << " Server Status ===" << std::endl;
+    std::cout << "Protocol: " << (ssl_enabled_ ? "HTTPS (SSL/TLS)" : "HTTP") << std::endl;
     std::cout << "Address: " << address_ << std::endl;
     std::cout << "Port: " << port_ << std::endl;
     std::cout << "Threads: " << threads_ << std::endl;
     std::cout << "Running: " << (running_ ? "Yes" : "No") << std::endl;
+    if (ssl_enabled_) {
+        std::cout << "Certificate: " << cert_file_ << std::endl;
+        std::cout << "Private Key: " << key_file_ << std::endl;
+    }
     std::cout << "Static Directory: " << (static_directory_.empty() ? "Not set" : static_directory_) << std::endl;
     std::cout << "Registered Routes:" << std::endl;
     std::cout << "  GET: " << get_handlers_.size() << " handler(s)" << std::endl;
@@ -490,6 +653,39 @@ http::response<http::string_body> HttpServer::handleRequest(const http::request<
     response.body() = "404 Not Found\n";
     response.prepare_payload();
     return response;
+}
+
+void HttpServer::addSession(const std::shared_ptr<Session>& session) {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    sessions_.erase(
+        std::remove_if(sessions_.begin(), sessions_.end(),
+            [](const std::weak_ptr<Session>& wp) { return wp.expired(); }),
+        sessions_.end()
+    );
+    sessions_.push_back(session);
+}
+
+void HttpServer::removeSession(const Session* session) {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    sessions_.erase(
+        std::remove_if(sessions_.begin(), sessions_.end(),
+            [session](const std::weak_ptr<Session>& wp) {
+                auto sp = wp.lock();
+                return !sp || sp.get() == session;
+            }),
+        sessions_.end()
+    );
+}
+
+void HttpServer::closeAllSessions() {
+    std::lock_guard<std::mutex> lock(sessions_mutex_);
+    for (auto& weak_session : sessions_) {
+        auto session = weak_session.lock();
+        if (session) {
+            // 会话会在析构时自动关闭socket
+        }
+    }
+    sessions_.clear();
 }
 
 void HttpServer::debug::print_all_header_fields(const http::request<http::string_body>& req) {
